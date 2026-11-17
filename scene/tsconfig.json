@@ -1,0 +1,13 @@
+{
+  "extends": "../engine/tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@threert/scene": ["../engine/packages/scene/src/index.ts"],
+      "@threert/gameplay": ["../engine/packages/gameplay/src/index.ts"]
+    },
+    "lib": ["es2023", "dom"],
+    "types": []
+  },
+  "include": ["./**/*.ts"]
+}

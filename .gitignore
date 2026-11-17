@@ -1,0 +1,7 @@
+.build/
+node_modules/
+core/target/
+app/*.xcodeproj
+.DS_Store
+*.xcuserstate
+xcuserdata/
