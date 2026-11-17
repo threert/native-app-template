@@ -1,4 +1,4 @@
-# The macOS app, as an xcodegen spec (`bun tools/app.ts` generates the Xcode project and builds it). The app is SwiftUI;
+# The macOS app, as an xcodegen spec (`bun tools/macos.ts` generates the Xcode project and builds it). The app is SwiftUI;
 # the 3D view is the Rust static library in core/ (libapp_core.a) on the ThreeRT engine in engine/.
 # Rename the product here: PRODUCT_NAME, PRODUCT_BUNDLE_IDENTIFIER.
 name: ThreeRTApp

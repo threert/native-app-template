@@ -44,4 +44,4 @@ jobs:
             ~/.cargo/git
             core/target
           key: core-${{ hashFiles('core/Cargo.lock') }}-${{ steps.engine.outputs.sha }}
-      - run: bun tools/app.ts
+      - run: bun tools/macos.ts

@@ -1,5 +1,5 @@
 // Builds the app: the Rust core (the engine inside), the Xcode project (xcodegen) and the app itself.
-//   bun tools/app.ts [--run] [--no-core] [--debug]
+//   bun tools/macos.ts [--run] [--no-core] [--debug]
 // Needs: Rust (rustup; the engine pins its toolchain), Xcode 16+, xcodegen (brew install xcodegen), Bun.
 import { $ } from "bun";
 import { existsSync } from "node:fs";
@@ -16,10 +16,10 @@ if (!args.includes("--no-core")) {
   console.log("core: cargo build --release (the first build takes a few minutes)");
   await $`cargo build --release`.cwd(join(root, "core")).env({ ...process.env, PATH: `${process.env.HOME}/.cargo/bin:${process.env.PATH}` });
 }
-await $`xcodegen generate --quiet`.cwd(join(root, "app"));
+await $`xcodegen generate --quiet`.cwd(join(root, "macos"));
 const configuration = args.includes("--debug") ? "Debug" : "Release";
 const build = await $`xcodebuild -project ThreeRTApp.xcodeproj -scheme ThreeRTApp -configuration ${configuration} -derivedDataPath ${join(root, ".build/xcode")} build`
-  .cwd(join(root, "app")).quiet().nothrow();
+  .cwd(join(root, "macos")).quiet().nothrow();
 if (build.exitCode !== 0) {
   const text = build.stdout.toString() + build.stderr.toString();
   console.error(text.split("\n").filter(line => /error:|BUILD FAILED/.test(line)).slice(0, 40).join("\n"));

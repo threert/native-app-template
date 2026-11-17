@@ -1,4 +1,4 @@
-// What the coding agent's bridge says to the app. The chat panel (app/App/AgentPanel.swift) is written against these
+// What the coding agent's bridge says to the app. The chat panel (macos/App/AgentPanel.swift) is written against these
 // shapes.
 export type AgentId = "claude" | "codex";
 export type AgentStatus = "idle" | "starting" | "working" | "waiting" | "error";

@@ -46,5 +46,5 @@ Other commands: `scene logs` (the scene's recent `console.*` lines and errors), 
 - It is a path tracer at 60 fps: keep geometry moderate (tens of thousands of triangles is fine), prefer few
   large emitters to hundreds of tiny ones, and remember every light and bounce costs.
 - Assets (glTF, textures) resolve against this folder. Generate textures in code (`DataTexture`) when you can.
-- Don't change files outside this folder (the engine in `../engine`, the app in `../app`, `../core`, `../sidecar`):
+- Don't change files outside this folder (the engine in `../engine`, the apps in `../macos` (and other platforms), `../core`, `../sidecar`):
   they are not yours, and the person's app depends on them.

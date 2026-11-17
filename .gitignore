@@ -1,7 +1,7 @@
 .build/
 node_modules/
 core/target/
-app/*.xcodeproj
+macos/*.xcodeproj
 .DS_Store
 *.xcuserstate
 xcuserdata/

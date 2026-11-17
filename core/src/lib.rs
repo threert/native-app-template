@@ -1,5 +1,5 @@
 //! The app's 3D view: ThreeRT's live path tracer and the scene's script (scene/, bundled by the sidecar), drawn on a
-//! CAMetalLayer the app owns. The SwiftUI app calls in through the C ABI at the end of this file (app/App/Core.h).
+//! CAMetalLayer the app owns. The SwiftUI app calls in through the C ABI at the end of this file (macos/App/Core.h).
 //!
 //! Everything runs on one thread of its own: the GPU device, the script runtime, the physics and the present. Calls
 //! from the app are commands in a channel; what the scene posts (its HUD, its own messages), its console lines and
@@ -439,7 +439,7 @@ fn texel(x: i32, y: i32) -> vec4<f32> {
 }
 "#;
 
-// ----- the C ABI (app/App/Core.h) -----
+// ----- the C ABI (macos/App/Core.h) -----
 
 unsafe fn text(p: *const c_char) -> String {
     if p.is_null() {

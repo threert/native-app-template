@@ -3,11 +3,11 @@
 Three processes' worth of parts, each in the language it is best at:
 
 ```
-┌─────────────────────────── the app (app/, SwiftUI) ───────────────────────────┐
+┌──────────────────── the macOS app (macos/, SwiftUI) ──────────────────────────┐
 │  RenderView: a CAMetalLayer ──────────────┐        SidePanel: Agent · Code · Console
 │  pointer, keys, resize                    │        HUD overlay (the scene's hud.set)
 │                                           ▼
-│  core/ (Rust static library, C ABI: app/App/Core.h)
+│  core/ (Rust static library, C ABI: macos/App/Core.h)
 │    its own thread: ThreeRT LiveCore (path tracer, wgpu/Metal) + GameSession
 │    (the scene's script in QuickJS, Rapier physics) + audio
 │    commands in a channel ◀── rt_* calls      rt_poll ──▶ posts, logs, stats
@@ -111,8 +111,21 @@ and console errors. Exit code 0 only when all are clean.
 - **A screen in the scene that shows your app's pixels:** a `StreamTexture("name", w, h)` on a material in the scene,
   `view.stream("name", width:height:rgba:)` from Swift (engine/docs/RUNTIME.md "Stream textures").
 - **Another agent:** add an `AgentSpec` in `adapters.ts` (any agent with an ACP adapter) and its id in `index.ts`.
-- **Name and icon:** `app/project.yml` (`PRODUCT_NAME`, `PRODUCT_BUNDLE_IDENTIFIER`).
-- **Another engine version:** `cd engine && git checkout <commit>`, then `bun tools/app.ts`.
+- **Name and icon:** `macos/project.yml` (`PRODUCT_NAME`, `PRODUCT_BUNDLE_IDENTIFIER`).
+- **Another engine version:** `cd engine && git checkout <commit>`, then `bun tools/macos.ts`.
+
+## Adding a platform
+
+Everything but the shell is shared. A new platform (its own folder next to `macos/`) needs:
+
+- **The view:** a native surface for the core. `core/src/lib.rs` makes its wgpu surface from a `CAMetalLayer`
+  (`SurfaceTargetUnsafe::CoreAnimationLayer`); another platform passes its own handle (an HWND, a Wayland or X11
+  window, an Android `ANativeWindow`) and `rt_create` grows a variant for it. The rest of the C ABI is the same.
+- **The sidecar:** start `bun sidecar/src/main.ts --with-parent`, read `{"port": N}` from its first line, hold the
+  WebSocket and speak the messages in the table above (`macos/App/Model.swift` is the reference: about 400 lines).
+- **The panels:** the agent chat, the code viewer, the console and the HUD, in the platform's own UI framework.
+  `macos/App/Highlighter.swift` is a dependency-free tokenizer that ports directly.
+- **A build script** in `tools/` (`tools/macos.ts` for macOS) and a CI job.
 
 ## Shipping it
 
