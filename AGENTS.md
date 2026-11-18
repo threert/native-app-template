@@ -12,7 +12,7 @@ change only files in `scene/`. The rest of this file is for working on the templ
   `".build/xcode/Build/Products/Release/ThreeRT App.app/Contents/MacOS/threert-app"`.
 - With the app running, `.build/bin/scene check | shot | logs | state` drive it; `curl -X POST
   localhost:<port>/api/app -d '{"t":"app.pointer","u":0.5,"v":0.5,"click":true}'` (port in `.build/server.json`)
-  clicks in the view, `{"t":"app.key","key":"N"}` presses a key, `{"t":"app.panel","tab":"code"}` switches the panel, `{"t":"app.prompt","text":"..."}` sends the agent a prompt as if typed.
+  clicks in the view, `{"t":"app.key","key":"N"}` presses a key (`"hold": 1.2` keeps it down that many seconds), `{"t":"app.panel","tab":"code"}` switches the panel, `{"t":"app.prompt","text":"..."}` sends the agent a prompt as if typed.
 - Offline stills without the app: `bun tools/still.ts out.png [--time 3] [--camera '{...}']`.
 - Tests: `cd sidecar && bun test` (the agent bridge against a fake ACP agent, the permission policy);
   type-checks: `cd sidecar && bunx tsc -p .`, `sidecar/node_modules/.bin/tsc -p scene`.

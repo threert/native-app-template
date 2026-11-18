@@ -1,5 +1,6 @@
 // Renders the scene offline to a PNG, without the app: for looking at a change, or for a coding agent outside the app.
 //   bun tools/still.ts [out.png] [--time 2] [--room night] [--width 1280 --height 720] [--camera '{"position":[..],"target":[..],"fov":40}']
+//                      [--entry scene/other.game.ts]   (another entry than scene/main.game.ts)
 // Uses the engine's command-line renderer (engine/renderer, built on first use; THREERT_RENDER names another binary).
 // The scene's frame script and physics run up to --time seconds of scene time before the picture is traced.
 import { $ } from "bun";
@@ -10,8 +11,10 @@ import { bundleScene, ENGINE, ROOT } from "../sidecar/src/bundle.ts";
 const args = process.argv.slice(2);
 const flag = (name: string) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : undefined; };
 const out = args.find(a => a.endsWith(".png")) ?? join(ROOT, ".build/still.png");
-const bundle = join(ROOT, ".build/still/scene.js");
-const built = await bundleScene(join(ROOT, "scene/main.game.ts"), bundle);
+// (One bundle a run: two agents rendering at once must not clobber each other's.)
+const bundle = join(ROOT, `.build/still/scene-${process.pid}.js`);
+const entry = flag("--entry") ? join(process.cwd(), flag("--entry")!) : join(ROOT, "scene/main.game.ts");
+const built = await bundleScene(entry, bundle);
 if (!built.ok) {
   for (const p of built.problems) console.error(`${p.file ?? ""}${p.line ? `:${p.line}` : ""} ${p.message}`);
   process.exit(1);
@@ -28,7 +31,7 @@ for (const name of ["--time", "--width", "--height", "--camera", "--spp", "--pre
 }
 if (!flag("--width")) extra.push("--width", "1280", "--height", "720");
 if (!flag("--time")) extra.push("--time", "2");
-const r = await $`${bin} render ${bundle} -o ${out} --assets ${join(ROOT, "scene")} ${extra}`.quiet().nothrow();
+const r = await $`${bin} render ${bundle} -o ${out} --assets ${join(ROOT, "scene")} --presets ${join(ENGINE, "presets")} ${extra}`.quiet().nothrow();
 if (r.exitCode !== 0) {
   console.error(r.stderr.toString().trim().split("\n").slice(-12).join("\n"));
   process.exit(1);

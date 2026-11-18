@@ -50,6 +50,11 @@ switch (command) {
     }
     for (const e of r.errors) console.log(`✗ [${e.where}] ${e.message}`);
     for (const l of r.logs) console.log(`  console.${l.level}: ${l.text}`);
+    if (r.stats) {
+      const s = r.stats;
+      const slow = s.scriptMs > 8 ? "  (the frame script is slow: it shares the render thread, keep it under a few ms)" : "";
+      console.log(`· ${Math.round(s.fps)} fps, GPU ${Number(s.gpuMs).toFixed(1)} ms, frame script ${Number(s.scriptMs).toFixed(1)} ms${slow}`);
+    }
     console.log(r.ok ? "OK" : "FAILED");
     process.exit(r.ok ? 0 : 1);
   }

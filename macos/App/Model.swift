@@ -199,9 +199,10 @@ final class Model: ObservableObject {
             }
             answer(m)
         case "app.key":
+            // (`hold`: seconds the key stays down; a tap otherwise.)
             let key = m["key"] as? String ?? ""
             view.key(key, down: true)
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) { [weak self] in self?.view.key(key, down: false) }
+            DispatchQueue.main.asyncAfter(deadline: .now() + (m["hold"] as? Double ?? 0.08)) { [weak self] in self?.view.key(key, down: false) }
             answer(m)
         case "app.wheel":
             view.wheel(m["notches"] as? Double ?? 1)
@@ -308,6 +309,8 @@ final class Model: ObservableObject {
                 var s: [String: Double] = [:]
                 for (k, v) in p { if let n = v as? Double { s[k] = n } else if let n = v as? Int { s[k] = Double(n) } }
                 stats = s
+                // (The sidecar keeps them for `scene state` / `scene check`: the agent sees what its change costs.)
+                send("runtime.stats", ["stats": s])
             case "rt.snapshot":
                 if let frame = p["path"] as? String, let shot = windowShots.removeValue(forKey: frame) {
                     let size = WindowShot.compose(view: view, frame: frame, to: shot.path)

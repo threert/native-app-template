@@ -30,6 +30,8 @@ export interface CheckReport {
   app: "running" | "failed" | "not connected" | "timeout";
   errors: { where: string; message: string }[];
   logs: LogLine[];
+  /** The view's statistics after the check's second of frames. */
+  stats?: Json | null;
 }
 
 export class Server {
@@ -42,6 +44,8 @@ export class Server {
   private stateTimer: ReturnType<typeof setTimeout> | undefined;
   private pending = new Map<number, (answer: Json) => void>();
   private nextRequest = 1;
+  /** The view's last statistics (once a second): fps, gpuMs, scriptMs, scale, spp, bounces, width, height. */
+  stats: Json | null = null;
 
   constructor() {
     this.scene = new SceneBuilds({
@@ -55,6 +59,7 @@ export class Server {
     this.on("runtime.reloaded", m => { this.scene.reloaded(Number(m.seq)); this.stateChanged(); });
     this.on("runtime.error", m => this.scene.error({ where: String(m.where ?? "?"), message: String(m.message ?? ""), at: Date.now(), ...(m.seq !== undefined ? { seq: Number(m.seq) } : {}) }));
     this.on("runtime.logs", m => this.scene.log(((m.lines as Json[]) ?? []).map(l => ({ level: String(l.level ?? "log"), text: String(l.text ?? ""), at: Date.now() }))));
+    this.on("runtime.stats", m => { this.stats = (m.stats as Json) ?? null; });
     this.on("answer", m => { const done = this.pending.get(Number(m.id)); if (done) { this.pending.delete(Number(m.id)); done(m); } });
     this.on("scene.build", async () => { await this.scene.build(); });
   }
@@ -126,6 +131,7 @@ export class Server {
       report.logs = this.scene.logs.filter(l => l.at >= since && /error|warn/.test(l.level)).slice(-20);
     }
     report.types = await types;
+    report.stats = this.stats;
     report.ok = build.ok && !(report.types?.length) && report.errors.length === 0 && (report.app === "running" || report.app === "not connected");
     return report;
   }
@@ -166,7 +172,7 @@ export class Server {
       try { body = text.trim() ? JSON.parse(text) : {}; } catch { return Response.json({ error: `the body is not JSON: ${text.slice(0, 200)}` }, { status: 400 }); }
     }
     switch (url.pathname) {
-      case "/api/state": return Response.json({ ...this.state(), app: this.appConnected });
+      case "/api/state": return Response.json({ ...this.state(), app: this.appConnected, stats: this.stats });
       case "/api/check": return Response.json(await this.check({ types: body.types !== false }));
       case "/api/logs": return Response.json({ logs: this.scene.logs.slice(-Number(url.searchParams.get("n") ?? 50)), errors: this.scene.errors.slice(-10) });
       case "/api/shot": {
