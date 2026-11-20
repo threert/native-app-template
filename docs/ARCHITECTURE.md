@@ -12,13 +12,13 @@ Three processes' worth of parts, each in the language it is best at:
 │    (the scene's script in QuickJS, Rapier physics) + audio
 │    commands in a channel ◀── rt_* calls      rt_poll ──▶ posts, logs, stats
 └────────────────────────────────┬──────────────────────────────────────────────┘
-                                 │ one WebSocket (JSON), ws://127.0.0.1:<port>/app
+                                 │ one WebSocket (JSON), ws://127.0.0.1:<port>/app?token=…
 ┌────────────────────────────────┴──── sidecar/ (Bun, TypeScript) ──────────────┐
 │  scene.ts   watch scene/ ─▶ bundle.ts (Bun.build + the engine's SDK) ─▶ scene.built
 │  agent/     ACP client ─▶ Claude Code / Codex (their ACP adapters, on stdio)
 │             policy.ts: what the agent may do without asking; transcript.ts: the chat
 │  server.ts  /app socket for the app; /api/* for the `scene` command line
-│  cli.ts     `scene check | shot | logs | send | state` (on the agent's PATH)
+│  cli.ts     `scene check | shot | logs | state | send | app` (on the agent's PATH)
 └───────────────────────────────────────────────────────────────────────────────┘
                  scene/  ◀── the agent edits these files; the app reloads them
                  engine/ ◀── ThreeRT (git submodule): renderer, SDK, docs
@@ -41,26 +41,39 @@ Three processes' worth of parts, each in the language it is best at:
 - `rt_poll` returns a JSON array of what happened since the last call: the scene's `host.post` messages (its `hud`,
   your own message types), its `console.*` lines (`log`), and the core's own `rt.ready`, `rt.fatal`, `rt.error`,
   `rt.reloaded`, `rt.stats`, `rt.snapshot`.
-- `rt_reload(bundle)` opens a new build of the scene in a fresh runtime on the same view; if its setup throws, the
-  old scene keeps running and `rt.error {where: "reload"}` says why.
+- `rt_reload(bundle)` opens a new build of the scene in a fresh runtime on the same view: `rt.reloaded {bundle}`; if
+  its setup throws, the old scene keeps running and `rt.error {where: "reload", bundle}` says why. Reloads that pile
+  up while a setup runs are not all run, only the newest (the others get no answer: the newer one answers for them).
+  The app passes the bundle on (`runtime.reloaded {bundle}`); the sidecar knows the build by its file name.
 - When the window is hidden or the display sleeps, the scene is still traced (more slowly), so snapshots and
   `scene check` work.
 
 ## The sidecar (sidecar/)
 
-Bun runs it; the app starts it with `--with-parent` (it exits when the app's pipe closes) and reads its port from its
-first line of output. Start one by hand with `bun sidecar/src/main.ts` and point the app at it with
-`RT_APP_SIDECAR=ws://127.0.0.1:<port>/app` to debug it separately.
+Bun runs it; the app starts it with `--with-parent` (it exits when the app's pipe closes), reads `{"port", "token"}`
+from its first line of output, and starts it again if it stops. Start one by hand with `bun sidecar/src/main.ts` and
+point the app at it with `RT_APP_SIDECAR=ws://127.0.0.1:<port>/app?token=<token>` to debug it separately.
+
+**Only the app and the command line get in.** The server listens on the loopback, wants the token the sidecar made
+at start on every request (the socket's `?token=`, the API's `Authorization: Bearer`; the `scene` command line reads
+it from `.build/server.json`, which only the user can read), and refuses any request with an `Origin` header: a web
+page in the user's browser must not reach an agent that runs commands.
 
 | Message | Direction | |
 | --- | --- | --- |
-| `state {scene: {build, loaded}, agent}` | sidecar → app | on connect and on every change |
+| `state {scene: {build, loaded}, agent, panel}` | sidecar → app | on connect and on every change (`panel`: `scene/app.json`'s) |
 | `scene.built {seq, bundle}` | sidecar → app | a build to run (`rt_reload`) |
 | `scene.files {paths}` | sidecar → app | files changed on disk (the code viewer reloads, marks changed lines) |
-| `app.snapshot`, `app.send`, `app.pointer`, `app.key`, `app.wheel`, `app.panel` `{id, ...}` | sidecar → app | requests of the command line / tests; answered with `answer {id, ...}` |
-| `runtime.reloaded {seq}`, `runtime.error {where, message, seq?}`, `runtime.logs {lines}` | app → sidecar | what the view reports, for `scene check` |
+| `app.snapshot {path, wait}` | sidecar → app | `scene shot`: the traced view to a PNG; `answer {id, path, width, height}` |
+| `app.send {messages}` | sidecar → app | `scene send`: host-channel messages for the scene (`rt_send`) |
+| `app.shot`, `app.pointer`, `app.key`, `app.wheel`, `app.panel`, `app.prompt` `{id, ...}` | sidecar → app | `scene app`: tests drive the window (the window shot, input, the panel, a prompt as if typed); `answer {id, ...}` |
+| `error {message}` | sidecar → app | a message of the app's the sidecar could not handle |
+| `runtime.reloaded {bundle}`, `runtime.error {where, message, bundle?}`, `runtime.logs {lines}`, `runtime.stats {stats}` | app → sidecar | what the view reports, for `scene check` / `scene state` |
+| `scene.build` | app → sidecar | build now (Rebuild Scene, ⌘R) |
+| `answer {id, ...}` | app → sidecar | the answer to an `app.*` request |
 | `agent.select`, `agent.prompt`, `agent.cancel`, `agent.permission`, `agent.new`, `agent.history` | app → sidecar | the chat panel |
-| `agent.item`, `agent.delta`, `agent.turn`, `agent.history` | sidecar → app | the agent's transcript, streamed |
+| `agent.item`, `agent.delta`, `agent.history` | sidecar → app | the agent's transcript, streamed |
+| `agent.turn {turn, status, stopReason?, ms?}` | sidecar → app | a turn's start and end (the status in `state` is what the macOS app shows) |
 
 ### The agent bridge (sidecar/src/agent/)
 
@@ -105,12 +118,14 @@ and console errors. Exit code 0 only when all are clean.
 
 ## Adapting the template
 
-- **Your own scene:** replace `scene/` (keep `main.game.ts` as the entry, `tsconfig.json`, `AGENTS.md`).
+- **Your own scene:** replace `scene/` (keep `main.game.ts` as the entry, `tsconfig.json`, `AGENTS.md`, `app.json`).
+- **The agent panel's words** (its title, intro, the input's placeholder, the suggested prompts): `scene/app.json`.
 - **Your own messages:** the scene posts `host.post({ t: "my.thing", ... })`; handle it in `Model.posts(_:)`.
   The app sends `view.send([["t": "my.command", ...]])`; the scene listens with `host.on("my.command", ...)`.
 - **A screen in the scene that shows your app's pixels:** a `StreamTexture("name", w, h)` on a material in the scene,
   `view.stream("name", width:height:rgba:)` from Swift (engine/docs/RUNTIME.md "Stream textures").
-- **Another agent:** add an `AgentSpec` in `adapters.ts` (any agent with an ACP adapter) and its id in `index.ts`.
+- **Another agent:** an `AgentSpec` in `adapters.ts` (any agent with an ACP adapter; its package version in
+  `PINNED`), its id in `AgentId` (`types.ts`) and in the `agent.select` check in `index.ts`.
 - **Name and icon:** `macos/project.yml` (`PRODUCT_NAME`, `PRODUCT_BUNDLE_IDENTIFIER`).
 - **Another engine version:** `cd engine && git checkout <commit>`, then `bun tools/macos.ts`.
 
@@ -121,8 +136,9 @@ Everything but the shell is shared. A new platform (its own folder next to `maco
 - **The view:** a native surface for the core. `core/src/lib.rs` makes its wgpu surface from a `CAMetalLayer`
   (`SurfaceTargetUnsafe::CoreAnimationLayer`); another platform passes its own handle (an HWND, a Wayland or X11
   window, an Android `ANativeWindow`) and `rt_create` grows a variant for it. The rest of the C ABI is the same.
-- **The sidecar:** start `bun sidecar/src/main.ts --with-parent`, read `{"port": N}` from its first line, hold the
-  WebSocket and speak the messages in the table above (`macos/App/Model.swift` is the reference: about 400 lines).
+- **The sidecar:** start `bun sidecar/src/main.ts --with-parent`, read `{"port", "token"}` from its first line, hold
+  the WebSocket and speak the messages in the table above (`macos/App/Model.swift` is the reference: about 400 lines;
+  `Sidecar.swift` starts the sidecar again when it stops).
 - **The panels:** the agent chat, the code viewer, the console and the HUD, in the platform's own UI framework.
   `macos/App/Highlighter.swift` is a dependency-free tokenizer that ports directly.
 - **A build script** in `tools/` (`tools/macos.ts` for macOS) and a CI job.

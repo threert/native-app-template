@@ -1,5 +1,5 @@
 // Where the app's parts are: the repository, for a build run from it (Info.plist `RTAppRoot`, set by project.yml), or
-// RT_APP_ROOT. A packaged app would carry them in its Resources (docs/PACKAGING.md).
+// RT_APP_ROOT. A packaged app would carry them in its Resources (README, "Shipping").
 import Foundation
 
 enum Paths {
@@ -15,7 +15,6 @@ enum Paths {
     /// The scene's sources (what the code viewer shows and the agent edits); also the root its asset paths resolve against.
     static var scene: String { root + "/scene" }
     static var presets: String { root + "/engine/presets" }
-    static var shots: String { root + "/.build/shots" }
 
     /// Bun, which runs the sidecar: RT_APP_BUN, else the first one found where installers put it.
     static func bun(searchPath: String) -> String? {

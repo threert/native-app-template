@@ -85,6 +85,8 @@ final class Model: ObservableObject {
     @Published var fatal: String?
     @Published var adapter = ""
     @Published var stats: [String: Double] = [:]
+    /// scene/app.json's "panel": the agent panel's words for this app.
+    @Published var panel = PanelText()
     @Published var hud: [HudItem] = []
     @Published var hudMessage: (title: String, subtitle: String)?
 
@@ -122,9 +124,9 @@ final class Model: ObservableObject {
     @Published var followAgent = true
     private var fileTexts: [String: String] = [:]
 
-    /// Builds sent to the view and not yet reported loaded (or failed), oldest first.
-    private var pending: [Int] = []
+    /// The newest build sent to the view (the view answers by bundle: rt.ready / rt.reloaded / rt.error "reload").
     private var startedSeq = 0
+    private var startedBundle: String?
     private var snapshots: [String: Int] = [:]
     private var windowShots: [String: (id: Int, path: String)] = [:]
     private var logBatch: [[String: Any]] = []
@@ -234,6 +236,7 @@ final class Model: ObservableObject {
     }
 
     private func state(_ m: [String: Any]) {
+        if let text = m["panel"] as? [String: Any] { panel = PanelText(text) }
         if let scene = m["scene"] as? [String: Any], let build = scene["build"] as? [String: Any] {
             buildOK = build["ok"] as? Bool ?? true
             buildSeq = build["seq"] as? Int ?? 0
@@ -264,12 +267,12 @@ final class Model: ObservableObject {
             if view.handle != nil { view.stop() }
             fatal = nil
             ready = false
-            pending = [seq]
             startedSeq = seq
+            startedBundle = bundle
             view.start(bundle: bundle)
         } else {
-            pending.append(seq)
             startedSeq = seq
+            startedBundle = bundle
             reloading = true
             view.reload(bundle)
         }
@@ -283,26 +286,27 @@ final class Model: ObservableObject {
             case "rt.ready":
                 ready = true
                 adapter = p["adapter"] as? String ?? ""
-                if !pending.isEmpty { send("runtime.reloaded", ["seq": pending.removeFirst()]) }
+                send("runtime.reloaded", ["bundle": p["bundle"] as? String ?? ""])
                 lastReload = Date()
             case "rt.fatal":
                 let message = p["message"] as? String ?? "the renderer could not start"
                 fatal = message
                 addLine(level: "error", source: "engine", text: message)
-                if !pending.isEmpty { send("runtime.error", ["where": "reload", "message": message, "seq": pending.removeFirst()]) }
+                send("runtime.error", ["where": "reload", "message": message, "bundle": startedBundle ?? ""])
             case "rt.reloaded":
-                reloading = false
                 lastReload = Date()
-                if !pending.isEmpty { send("runtime.reloaded", ["seq": pending.removeFirst()]) }
+                let bundle = p["bundle"] as? String ?? ""
+                if bundle == startedBundle { reloading = false }
+                send("runtime.reloaded", ["bundle": bundle])
                 addLine(level: "info", source: "app", text: "reloaded the scene")
             case "rt.error":
                 let place = p["where"] as? String ?? "?"
                 let message = p["message"] as? String ?? ""
                 addLine(level: "error", source: place, text: message)
                 var report: [String: Any] = ["where": place, "message": message]
-                if place == "reload" {
-                    reloading = false
-                    if !pending.isEmpty { report["seq"] = pending.removeFirst() }
+                if place == "reload", let bundle = p["bundle"] as? String {
+                    if bundle == startedBundle { reloading = false }
+                    report["bundle"] = bundle
                 }
                 send("runtime.error", report)
             case "rt.stats":
@@ -429,9 +433,25 @@ final class Model: ObservableObject {
     func snapshotToDesktop() {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd 'at' HH.mm.ss"
-        let path = NSHomeDirectory() + "/Desktop/ThreeRT \(formatter.string(from: Date())).png"
+        let name = Bundle.main.object(forInfoDictionaryKey: "CFBundleName") as? String ?? "ThreeRT"
+        let path = NSHomeDirectory() + "/Desktop/\(name) \(formatter.string(from: Date())).png"
         view.snapshot(to: path)
         addLine(level: "info", source: "app", text: "snapshot: \(path)")
+    }
+}
+
+/// The agent panel's words for this app (scene/app.json "panel"; these until it is read).
+struct PanelText {
+    var title = "Change the scene by asking"
+    var intro = "The agent edits the TypeScript in scene/. Every save is rebuilt and reloaded in the view within a second."
+    var placeholder = "Ask the agent to change the scene…"
+    var suggestions: [String] = []
+    init() {}
+    init(_ j: [String: Any]) {
+        title = j["title"] as? String ?? title
+        intro = j["intro"] as? String ?? intro
+        placeholder = j["placeholder"] as? String ?? placeholder
+        suggestions = j["suggestions"] as? [String] ?? []
     }
 }
 

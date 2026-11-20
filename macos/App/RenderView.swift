@@ -121,7 +121,7 @@ final class RenderNSView: NSView {
 
     private static let named: [UInt16: String] = [
         49: "Space", 53: "Escape", 36: "Enter", 48: "Tab", 51: "Backspace", 123: "Left", 124: "Right", 125: "Down", 126: "Up",
-        56: "Shift", 60: "Shift", 59: "Ctrl", 58: "Alt", 55: "Meta",
+        56: "Shift", 60: "Shift", 59: "Ctrl", 62: "Ctrl", 58: "Alt", 61: "Alt", 55: "Meta", 54: "Meta",
     ]
     private func key(_ event: NSEvent, down: Bool) {
         var name = RenderNSView.named[event.keyCode]
@@ -130,11 +130,37 @@ final class RenderNSView: NSView {
         guard let name else { return }
         key(name, down: down)
     }
+    /// Keys the scene holds down: released together when the view loses the keyboard (a held W would stay down).
+    private var held: Set<String> = []
     override func keyDown(with event: NSEvent) {
         if event.modifierFlags.contains(.command) { super.keyDown(with: event); return }
         if !event.isARepeat { key(event, down: true) }
     }
     override func keyUp(with event: NSEvent) { key(event, down: false) }
+    /// Shift, Ctrl, Alt and Cmd come as a change of the modifier flags, not as keyDown / keyUp.
+    override func flagsChanged(with event: NSEvent) {
+        let flag: NSEvent.ModifierFlags
+        switch event.keyCode {
+        case 56, 60: flag = .shift
+        case 59, 62: flag = .control
+        case 58, 61: flag = .option
+        case 55, 54: flag = .command
+        default: super.flagsChanged(with: event); return
+        }
+        key(event, down: event.modifierFlags.contains(flag))
+    }
+    private func releaseKeys() { for name in held { key(name, down: false) } }
+    override func resignFirstResponder() -> Bool {
+        releaseKeys()
+        return super.resignFirstResponder()
+    }
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        // Another app or window takes the keyboard: its key-ups never reach this view.
+        NotificationCenter.default.removeObserver(self, name: NSWindow.didResignKeyNotification, object: nil)
+        if let window { NotificationCenter.default.addObserver(self, selector: #selector(windowResignedKey), name: NSWindow.didResignKeyNotification, object: window) }
+    }
+    @objc private func windowResignedKey() { releaseKeys() }
 
     // ----- for the model (and tests that drive the view) -----
 
@@ -150,11 +176,13 @@ final class RenderNSView: NSView {
     func wheel(_ notches: Double) { if let handle { rt_wheel(handle, Float(notches)) } }
     func key(_ name: String, down: Bool) {
         guard let handle else { return }
+        if down { held.insert(name) } else { held.remove(name) }
         let code = name.count == 1 ? (name.first!.isNumber ? "Digit\(name)" : "Key\(name)") : name
         rt_key(handle, code, name, down)
     }
     func snapshot(to path: String) { if let handle { rt_snapshot(handle, path) } }
     func reload(_ bundle: String) { if let handle { rt_reload(handle, bundle) } }
+    /// Content frames a second, render scale (0: dynamic) and the most bounces (the engine's frame governor works within them).
     func quality(fps: Int, scale: Double, bounces: Int) { if let handle { rt_quality(handle, UInt32(fps), Float(scale), UInt32(bounces)) } }
     /// Pictures for a `StreamTexture` in the scene (an in-scene screen, a camera feed): RGBA8, copied before it returns.
     func stream(_ name: String, width: Int, height: Int, rgba: Data) {

@@ -6,14 +6,15 @@
 import { $ } from "bun";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { bundleScene, ENGINE, ROOT } from "../sidecar/src/bundle.ts";
+import { bundleScene } from "../sidecar/src/bundle.ts";
+import { BUILD, ENGINE, ENTRY, SCENE } from "../sidecar/src/paths.ts";
 
 const args = process.argv.slice(2);
 const flag = (name: string) => { const i = args.indexOf(name); return i >= 0 ? args[i + 1] : undefined; };
-const out = args.find(a => a.endsWith(".png")) ?? join(ROOT, ".build/still.png");
+const out = args.find(a => a.endsWith(".png")) ?? join(BUILD, "still.png");
 // (One bundle a run: two agents rendering at once must not clobber each other's.)
-const bundle = join(ROOT, `.build/still/scene-${process.pid}.js`);
-const entry = flag("--entry") ? join(process.cwd(), flag("--entry")!) : join(ROOT, "scene/main.game.ts");
+const bundle = join(BUILD, `still/scene-${process.pid}.js`);
+const entry = flag("--entry") ? join(process.cwd(), flag("--entry")!) : ENTRY;
 const built = await bundleScene(entry, bundle);
 if (!built.ok) {
   for (const p of built.problems) console.error(`${p.file ?? ""}${p.line ? `:${p.line}` : ""} ${p.message}`);
@@ -31,7 +32,7 @@ for (const name of ["--time", "--width", "--height", "--camera", "--spp", "--pre
 }
 if (!flag("--width")) extra.push("--width", "1280", "--height", "720");
 if (!flag("--time")) extra.push("--time", "2");
-const r = await $`${bin} render ${bundle} -o ${out} --assets ${join(ROOT, "scene")} --presets ${join(ENGINE, "presets")} ${extra}`.quiet().nothrow();
+const r = await $`${bin} render ${bundle} -o ${out} --assets ${SCENE} --presets ${join(ENGINE, "presets")} ${extra}`.quiet().nothrow();
 if (r.exitCode !== 0) {
   console.error(r.stderr.toString().trim().split("\n").slice(-12).join("\n"));
   process.exit(1);

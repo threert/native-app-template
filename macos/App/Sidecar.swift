@@ -1,6 +1,7 @@
 // The sidecar (sidecar/src/main.ts, run by Bun): builds the scene on every change, bridges the coding agent and serves
-// the agent's `scene` command line. The app starts it, reads its port from its first line of output and holds one
-// WebSocket to it: JSON messages both ways (sidecar/src/server.ts lists them).
+// the agent's `scene` command line. The app starts it, reads its port and token from its first line of output and
+// holds one WebSocket to it: JSON messages both ways (docs/ARCHITECTURE.md lists them). If it stops, it is started
+// again (a few times).
 import Foundation
 
 final class Sidecar: NSObject, URLSessionWebSocketDelegate {
@@ -14,10 +15,12 @@ final class Sidecar: NSObject, URLSessionWebSocketDelegate {
     private var url: URL?
     private var closed = false
     private var buffer = Data()
+    private var restarts = 0
 
     func start() {
         let env = ProcessInfo.processInfo.environment
-        // A sidecar started by hand (`bun sidecar/src/main.ts`): RT_APP_SIDECAR=ws://127.0.0.1:<port>/app.
+        // A sidecar started by hand (`bun sidecar/src/main.ts` prints its port and token):
+        // RT_APP_SIDECAR=ws://127.0.0.1:<port>/app?token=<token>.
         if let existing = env["RT_APP_SIDECAR"], let url = URL(string: existing) {
             self.url = url
             connect()
@@ -48,7 +51,7 @@ final class Sidecar: NSObject, URLSessionWebSocketDelegate {
             DispatchQueue.main.async { self?.output(data) }
         }
         process.terminationHandler = { [weak self] p in
-            DispatchQueue.main.async { if self?.closed == false { self?.onStatus?("The sidecar stopped (\(p.terminationStatus)): see the terminal's output") } }
+            DispatchQueue.main.async { self?.stopped(status: p.terminationStatus) }
         }
         do {
             try process.run()
@@ -56,6 +59,26 @@ final class Sidecar: NSObject, URLSessionWebSocketDelegate {
             onStatus?("starting")
         } catch {
             onStatus?("The sidecar did not start: \(error.localizedDescription)")
+        }
+    }
+
+    /// The sidecar ended without being asked to: start another (its port and token are new), a few times.
+    private func stopped(status: Int32) {
+        guard !closed else { return }
+        socket?.cancel(with: .goingAway, reason: nil)
+        socket = nil
+        url = nil
+        buffer = Data()
+        process = nil
+        guard restarts < 5 else {
+            onStatus?("The sidecar stopped (\(status)) and did not stay up: see the terminal's output")
+            return
+        }
+        restarts += 1
+        onStatus?("The sidecar stopped (\(status)): starting it again")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+            guard let self, !self.closed else { return }
+            self.start()
         }
     }
 
@@ -85,8 +108,9 @@ final class Sidecar: NSObject, URLSessionWebSocketDelegate {
         while let newline = buffer.firstIndex(of: 10) {
             let line = buffer.subdata(in: buffer.startIndex..<newline)
             buffer.removeSubrange(buffer.startIndex...newline)
-            if url == nil, let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any], let port = object["port"] as? Int {
-                url = URL(string: "ws://127.0.0.1:\(port)/app")
+            if url == nil, let object = try? JSONSerialization.jsonObject(with: line) as? [String: Any], let port = object["port"] as? Int,
+               let token = object["token"] as? String {
+                url = URL(string: "ws://127.0.0.1:\(port)/app?token=\(token)")
                 connect()
             } else if let text = String(data: line, encoding: .utf8) {
                 FileHandle.standardError.write(("sidecar: " + text + "\n").data(using: .utf8)!)
@@ -103,29 +127,32 @@ final class Sidecar: NSObject, URLSessionWebSocketDelegate {
         receive(task)
     }
 
+    /// (The socket's callbacks come on its queue; the state they look at is the main thread's.)
     private func receive(_ task: URLSessionWebSocketTask) {
         task.receive { [weak self] result in
-            guard let self, self.socket === task else { return }
-            switch result {
-            case .failure:
-                task.cancel(with: .goingAway, reason: nil)
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                    guard let self, self.socket === task, !self.closed else { return }
-                    self.onStatus?("reconnecting")
-                    self.connect()
+            DispatchQueue.main.async {
+                guard let self, self.socket === task else { return }
+                switch result {
+                case .failure:
+                    task.cancel(with: .goingAway, reason: nil)
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                        guard let self, self.socket === task, !self.closed else { return }
+                        self.onStatus?("reconnecting")
+                        self.connect()
+                    }
+                case .success(let message):
+                    if case .string(let text) = message, let data = text.data(using: .utf8),
+                       let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                        self.onMessage?(object)
+                    }
+                    self.receive(task)
                 }
-            case .success(let message):
-                if case .string(let text) = message, let data = text.data(using: .utf8),
-                   let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-                    DispatchQueue.main.async { self.onMessage?(object) }
-                }
-                self.receive(task)
             }
         }
     }
 
     func urlSession(_ session: URLSession, webSocketTask: URLSessionWebSocketTask, didOpenWithProtocol protocol: String?) {
-        DispatchQueue.main.async { self.onStatus?("connected") }
+        DispatchQueue.main.async { self.restarts = 0; self.onStatus?("connected") }
     }
 
     func send(_ message: [String: Any]) {

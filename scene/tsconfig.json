@@ -4,7 +4,8 @@
     "baseUrl": ".",
     "paths": {
       "@threert/scene": ["../engine/packages/scene/src/index.ts"],
-      "@threert/gameplay": ["../engine/packages/gameplay/src/index.ts"]
+      "@threert/gameplay": ["../engine/packages/gameplay/src/index.ts"],
+      "@threert/voxel": ["../engine/packages/voxel/src/index.ts"]
     },
     "lib": ["es2023", "dom"],
     "types": []

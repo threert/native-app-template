@@ -29,6 +29,12 @@ export interface SceneEvents {
   files(paths: string[]): void;
 }
 
+/** The build number in a bundle's name (`.build/scene/scene-12.js`). */
+const seqOf = (bundle: string): number | undefined => {
+  const n = Number(/scene-(\d+)\.js$/.exec(bundle)?.[1]);
+  return n || undefined;
+};
+
 const IGNORED = /(^|\/)(node_modules|\.git|\.DS_Store)(\/|$)/;
 
 export class SceneBuilds {
@@ -42,7 +48,11 @@ export class SceneBuilds {
   private again = false;
   private waiters: { seq: number; resolve: (result: { loaded: boolean; error?: RuntimeError }) => void }[] = [];
 
-  constructor(private readonly events: SceneEvents) {}
+  constructor(private readonly events: SceneEvents) {
+    // Numbers go on from the bundles already there: a sidecar started again must not reuse one the app has run.
+    const dir = join(BUILD, "scene");
+    if (existsSync(dir)) for (const name of readdirSync(dir)) this.seq = Math.max(this.seq, seqOf(name) ?? 0);
+  }
 
   /** Watches scene/ and builds on every change (debounced). */
   watch(): void {
@@ -56,7 +66,8 @@ export class SceneBuilds {
         const paths = [...changed];
         changed.clear();
         this.events.files(paths);
-        if (paths.some(path => /\.(ts|js|json)$/.test(path))) void this.build();
+        // Everything but notes is the scene: code, shaders, models, textures (setup loads them again on a reload).
+        if (paths.some(path => !/\.(md|txt)$/i.test(path))) void this.build();
       }, 120);
     });
   }
@@ -87,30 +98,35 @@ export class SceneBuilds {
     return this.running;
   }
 
-  /** Keeps the last few bundles: the app may still be loading the one before. */
+  /** Deletes old bundles: those before the one the app runs, keeping a few (the app may be loading one of them). */
   private prune(seq: number): void {
     const dir = join(BUILD, "scene");
     if (!existsSync(dir)) return;
     for (const name of readdirSync(dir)) {
-      const n = Number(/^scene-(\d+)\.js$/.exec(name)?.[1]);
-      if (n && n < seq - 3) rmSync(join(dir, name), { force: true });
+      const n = seqOf(name);
+      if (n && n < seq - 3 && n < this.loaded) rmSync(join(dir, name), { force: true });
     }
   }
 
-  // ----- what the app reports -----
+  // ----- what the app reports (by bundle: the view answers for the newest of the builds it was sent) -----
 
-  reloaded(seq: number): void {
+  reloaded(bundle: string): void {
+    const seq = seqOf(bundle);
+    if (!seq) return;
     this.loaded = Math.max(this.loaded, seq);
     for (const w of this.waiters.filter(w => w.seq <= seq)) w.resolve({ loaded: true });
     this.waiters = this.waiters.filter(w => w.seq > seq);
   }
 
-  error(error: RuntimeError): void {
+  error(error: RuntimeError & { bundle?: string }): void {
+    if (error.bundle) { error.seq = seqOf(error.bundle); delete error.bundle; }
     this.errors.push(error);
     if (this.errors.length > 100) this.errors.splice(0, this.errors.length - 100);
     if (error.where === "reload" && error.seq !== undefined) {
-      for (const w of this.waiters.filter(w => w.seq === error.seq)) w.resolve({ loaded: false, error });
-      this.waiters = this.waiters.filter(w => w.seq !== error.seq);
+      // (Builds before it that the view skipped for it failed with it.)
+      const failed = error.seq;
+      for (const w of this.waiters.filter(w => w.seq <= failed)) w.resolve({ loaded: false, error });
+      this.waiters = this.waiters.filter(w => w.seq > failed);
     }
   }
 

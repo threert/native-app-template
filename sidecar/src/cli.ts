@@ -1,5 +1,5 @@
 // `scene`: the app's command line, for the coding agent working in scene/ (and for people). Talks to the running
-// sidecar over HTTP (its port is in .build/server.json).
+// sidecar over HTTP (its port and token are in .build/server.json).
 //
 //   scene check [--no-types]    build + type-check the scene, have the app run it for a second; exit 1 on a problem
 //   scene shot [file.png]       save what the view shows as a PNG (default .build/shots/…); prints the path
@@ -7,21 +7,26 @@
 //   scene logs [-n 50]          the scene's recent console lines and runtime errors
 //   scene state                 the build, the app, the agent (JSON)
 //   scene send '<json>'         a host-channel message for the scene (`host.on(t, ...)` in scene code)
+//   scene app '<json>'          a request for the app, as tests drive it: {"t":"app.key","key":"N","hold":1.2},
+//                               app.pointer {u, v, click | button, down}, app.wheel {notches}, app.panel {tab, show,
+//                               file}, app.prompt {text} (to the agent, as if typed), app.shot {path} (= shot --window)
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { SERVER_FILE } from "./paths.ts";
 
 const [command = "help", ...args] = process.argv.slice(2);
 
-function port(): number {
-  try { return JSON.parse(readFileSync(SERVER_FILE, "utf8")).port; } catch {
+function server(): { port: number; token: string } {
+  try { return JSON.parse(readFileSync(SERVER_FILE, "utf8")); } catch {
     console.error("The app is not running (no sidecar): start it, then try again.");
     process.exit(2);
   }
 }
 
 async function call(path: string, body?: unknown): Promise<any> {
-  const response = await fetch(`http://127.0.0.1:${port()}${path}`, body === undefined ? {} : { method: "POST", body: JSON.stringify(body) }).catch(() => {
+  const { port, token } = server();
+  const headers = { authorization: `Bearer ${token}` };
+  const response = await fetch(`http://127.0.0.1:${port}${path}`, body === undefined ? { headers } : { method: "POST", headers, body: JSON.stringify(body) }).catch(() => {
     console.error("The app is not running (the sidecar did not answer): start it, then try again.");
     process.exit(2);
   });
@@ -79,6 +84,12 @@ switch (command) {
     let message: unknown;
     try { message = JSON.parse(text); } catch { console.error("scene send takes a JSON message: scene send '{\"t\":\"my.message\"}'"); process.exit(1); }
     console.log(JSON.stringify(await call("/api/send", Array.isArray(message) ? { messages: message } : { message })));
+    break;
+  }
+  case "app": {
+    let request: unknown;
+    try { request = JSON.parse(args.join(" ")); } catch { console.error("scene app takes a JSON request: scene app '{\"t\":\"app.key\",\"key\":\"N\"}'"); process.exit(1); }
+    console.log(JSON.stringify(await call("/api/app", request)));
     break;
   }
   default:
