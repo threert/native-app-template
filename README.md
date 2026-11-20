@@ -93,6 +93,18 @@ elsewhere, the network) appears in the chat as a permission card for you to allo
 | Another ACP agent | `sidecar/src/agent/adapters.ts` |
 | Another engine version | `cd engine && git checkout <commit>`, then `bun tools/macos.ts` |
 
+A fork that keeps to that table (its own `scene/`, its name in `project.yml`) takes the template's later fixes with
+a plain merge:
+
+```bash
+git remote add template https://github.com/threert/native-app-template
+git fetch template && git merge template/main     # conflicts only where you changed the template's own files
+```
+
+Examples (archived, kept as they were): [Mochi Party](https://github.com/threert/mochi-party), a cartoon physics
+party game built on this template (some of its modes and furniture were made from the agent panel), and
+[Pocket Bench](https://github.com/threert/pocket-bench), the hardware studio this template was extracted from.
+
 ## Developing
 
 ```bash
