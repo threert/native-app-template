@@ -1,23 +1,16 @@
-// The sidecar's door: one HTTP and WebSocket server on the loopback.
+// The sidecar's door: one HTTP and WebSocket server on the loopback. Every request carries the token the sidecar made
+// at start (the app gets it with the port on the sidecar's first line of output, the `scene` command line from
+// .build/server.json); a request from a web page (it has an Origin) is refused: the agent runs commands as the user.
 //
-//   WS  /app        the app: JSON messages both ways (see the table in docs/ARCHITECTURE.md)
-//   GET /api/state  POST /api/check | shot | send      the `scene` command line (the coding agent) and tests
-//
-// Messages the sidecar sends the app:
-//   state {scene: {build, loaded}, agent}     on connect and whenever something in it changes
-//   scene.built {seq, bundle}                 a new build to run (rt_reload)
-//   scene.files {paths}                       files of scene/ changed on disk (the code viewer reloads them)
-//   app.snapshot {id, path} | app.send {messages}     requests of the command line
-//   agent.*                                   the coding agent's transcript (agent/index.ts)
-// Messages the app sends:
-//   runtime.reloaded {seq} | runtime.error {where, message, seq?} | runtime.logs {lines}     what the view reports
-//   answer {id, ...}                          the answer to an app.* request
-//   agent.*                                   the chat panel's requests
+//   WS   /app?token=…                 the app: JSON messages both ways (the table in docs/ARCHITECTURE.md)
+//   GET  /api/state | /api/logs       POST /api/check | /api/shot | /api/send | /api/app     the `scene` command line
+//        (header `Authorization: Bearer <token>`)
 import type { ServerWebSocket } from "bun";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import type { Handler } from "./agent/types.ts";
-import { BUILD, SCENE, SERVER_FILE } from "./paths.ts";
+import { APP_FILE, BUILD, SCENE, SERVER_FILE } from "./paths.ts";
 import { SceneBuilds, type Build, type LogLine, type Problem } from "./scene.ts";
 
 type Json = Record<string, unknown>;
@@ -34,8 +27,15 @@ export interface CheckReport {
   stats?: Json | null;
 }
 
+/** scene/app.json's "panel": the agent panel's words for this app (title, intro, placeholder, suggestions). */
+function panelText(): Json {
+  try { return JSON.parse(readFileSync(APP_FILE, "utf8")).panel ?? {}; } catch { return {}; }
+}
+
 export class Server {
   readonly project = SCENE;
+  /** What every request must carry. */
+  readonly token = randomBytes(24).toString("hex");
   readonly scene: SceneBuilds;
   readonly handlers = new Map<string, Handler>();
   readonly stateParts: (() => Json)[] = [];
@@ -53,11 +53,15 @@ export class Server {
         if (build.ok) this.broadcast({ t: "scene.built", seq: build.seq, bundle: build.bundle });
         this.stateChanged();
       },
-      files: paths => this.broadcast({ t: "scene.files", paths }),
+      files: paths => {
+        this.broadcast({ t: "scene.files", paths });
+        if (paths.includes("app.json")) this.stateChanged();
+      },
     });
     this.stateParts.push(() => ({ scene: { build: this.buildState(this.scene.last), loaded: this.scene.loaded } }));
-    this.on("runtime.reloaded", m => { this.scene.reloaded(Number(m.seq)); this.stateChanged(); });
-    this.on("runtime.error", m => this.scene.error({ where: String(m.where ?? "?"), message: String(m.message ?? ""), at: Date.now(), ...(m.seq !== undefined ? { seq: Number(m.seq) } : {}) }));
+    this.stateParts.push(() => ({ panel: panelText() }));
+    this.on("runtime.reloaded", m => { this.scene.reloaded(String(m.bundle ?? "")); this.stateChanged(); });
+    this.on("runtime.error", m => this.scene.error({ where: String(m.where ?? "?"), message: String(m.message ?? ""), at: Date.now(), ...(m.bundle ? { bundle: String(m.bundle) } : {}) }));
     this.on("runtime.logs", m => this.scene.log(((m.lines as Json[]) ?? []).map(l => ({ level: String(l.level ?? "log"), text: String(l.text ?? ""), at: Date.now() }))));
     this.on("runtime.stats", m => { this.stats = (m.stats as Json) ?? null; });
     this.on("answer", m => { const done = this.pending.get(Number(m.id)); if (done) { this.pending.delete(Number(m.id)); done(m); } });
@@ -136,12 +140,16 @@ export class Server {
     return report;
   }
 
-  async listen(): Promise<number> {
+  /** Listens on the loopback; `file` gets the port and the token for the command line. */
+  async listen(file = SERVER_FILE): Promise<number> {
     this.server = Bun.serve<{ role: string }, never>({
       hostname: "127.0.0.1",
       port: Number(process.env.RT_APP_PORT ?? 0),
       fetch: async (request, server) => {
         const url = new URL(request.url);
+        if (request.headers.has("origin")) return new Response("forbidden", { status: 403 });
+        const token = url.searchParams.get("token") ?? request.headers.get("authorization")?.replace(/^Bearer /, "");
+        if (token !== this.token) return new Response("forbidden", { status: 403 });
         if (url.pathname === "/app") {
           return server.upgrade(request, { data: { role: "app" } }) ? undefined : new Response("upgrade failed", { status: 400 });
         }
@@ -160,8 +168,9 @@ export class Server {
       },
     });
     const port = this.server.port!;
-    mkdirSync(dirname(SERVER_FILE), { recursive: true });
-    writeFileSync(SERVER_FILE, JSON.stringify({ port, pid: process.pid }) + "\n");
+    mkdirSync(dirname(file), { recursive: true });
+    rmSync(file, { force: true });  // (made anew: `mode` applies to a new file only)
+    writeFileSync(file, JSON.stringify({ port, pid: process.pid, token: this.token }) + "\n", { mode: 0o600 });
     return port;
   }
 
@@ -188,8 +197,8 @@ export class Server {
         return Response.json({ sent: messages.length });
       }
       case "/api/app": {
-        if (typeof body.t !== "string") return Response.json({ error: "a request for the app needs a type: {\"t\": \"app.…\", ...}" }, { status: 400 });
-        // Any request for the app (tests drive the window with it: app.pointer, app.key, app.shot, ...).
+        if (typeof body.t !== "string" || !body.t.startsWith("app.")) return Response.json({ error: "a request for the app needs a type: {\"t\": \"app.…\", ...}" }, { status: 400 });
+        // A request for the app (tests drive the window with them: `scene app`, Model.swift's "for tests" section).
         const answer = await this.ask(body);
         return answer ? Response.json(answer) : Response.json({ error: "the app is not running (or did not answer)" }, { status: 503 });
       }

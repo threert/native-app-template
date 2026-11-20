@@ -1,0 +1,12 @@
+{
+  "panel": {
+    "title": "Change the scene by asking",
+    "intro": "The agent edits the TypeScript in scene/. Every save is rebuilt and reloaded in the view within a second; it checks its own work with `scene check` and `scene shot`.",
+    "placeholder": "Ask the agent to change the scene…",
+    "suggestions": [
+      "Add a reading lamp on the table that I can switch with the L key",
+      "Make the orbs leave a short trail of sparks as they roll",
+      "Turn it into a rainy evening: dim blue light through the skylight"
+    ]
+  }
+}

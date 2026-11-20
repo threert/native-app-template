@@ -4,15 +4,13 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import type { BunPlugin } from "bun";
-
-export const ROOT = resolve(import.meta.dir, "../..");
-export const ENGINE = join(ROOT, "engine");
+import { BUILD, ENGINE, ENTRY } from "./paths.ts";
 
 const PACKAGES: Record<string, string> = {
   "@threert/scene": join(ENGINE, "packages/scene/src/index.ts"),
   "@threert/gameplay": join(ENGINE, "packages/gameplay/src/index.ts"),
   "@threert/voxel": join(ENGINE, "packages/voxel/src/index.ts"),
-};
+};  // (scene/tsconfig.json maps the same three for the type-check)
 
 const engineSdk: BunPlugin = {
   name: "threert-sdk",
@@ -61,8 +59,8 @@ export async function bundleScene(entry: string, out: string): Promise<BundleRes
 }
 
 if (import.meta.main) {
-  const entry = process.argv[2] ?? join(ROOT, "scene/main.game.ts");
-  const out = process.argv[3] ?? join(ROOT, ".build/scene/scene.js");
+  const entry = process.argv[2] ?? ENTRY;
+  const out = process.argv[3] ?? join(BUILD, "scene/scene.js");
   const r = await bundleScene(entry, out);
   if (r.ok) console.log(`${r.out}: ${(r.bytes / 1024).toFixed(0)} KiB in ${r.ms.toFixed(0)} ms`);
   else { for (const p of r.problems) console.error(`${p.file ?? ""}${p.line ? `:${p.line}` : ""} ${p.message}`); process.exit(1); }

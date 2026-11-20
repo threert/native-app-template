@@ -85,12 +85,25 @@ elsewhere, the network) appears in the chat as a permission card for you to allo
 | To | Change |
 | --- | --- |
 | Write your own scene | `scene/` (entry `main.game.ts`; see [`scene/README.md`](scene/README.md) and the engine's [`docs/RUNTIME.md`](https://github.com/meshy-dev/ThreeRT/blob/main/docs/RUNTIME.md)) |
-| Name, bundle id, icon | `macos/project.yml` |
+| Name, bundle id, icon | `macos/project.yml` (`PRODUCT_NAME`, `PRODUCT_BUNDLE_IDENTIFIER`; `tools/macos.ts` reads the name from it) |
+| The agent panel's title, intro and suggested prompts | `scene/app.json` |
 | Talk between your UI and the scene | the scene: `host.post({ t: "my.event" })` / `host.on("my.command", …)`; the app: `Model.posts(_:)` / `view.send(_:)` |
 | Show your app's pixels on a surface in the scene | a `StreamTexture` in the scene, `view.stream(_:width:height:rgba:)` in Swift |
 | Tell the agent about your project | `scene/AGENTS.md` (read by Claude Code through `scene/CLAUDE.md`, and by Codex) |
 | Another ACP agent | `sidecar/src/agent/adapters.ts` |
 | Another engine version | `cd engine && git checkout <commit>`, then `bun tools/macos.ts` |
+
+A fork that keeps to that table (its own `scene/`, its name in `project.yml`) takes the template's later fixes with
+a plain merge:
+
+```bash
+git remote add template https://github.com/threert/native-app-template
+git fetch template && git merge template/main     # conflicts only where you changed the template's own files
+```
+
+Examples (archived, kept as they were): [Mochi Party](https://github.com/threert/mochi-party), a cartoon physics
+party game built on this template (some of its modes and furniture were made from the agent panel), and
+[Pocket Bench](https://github.com/threert/pocket-bench), the hardware studio this template was extracted from.
 
 ## Developing
 
@@ -102,6 +115,7 @@ bun tools/still.ts out.png --time 3          # the scene rendered offline, witho
 .build/bin/scene shot --window out.png       # the window, composed offscreen (works with the display asleep)
 ```
 
+`.build/bin/scene app '{"t":"app.key","key":"N"}'` drives the window as tests do (AGENTS.md lists the requests).
 `RT_APP_ACP_LOG=/tmp/acp.log` logs every message between the bridge and the agent.
 
 ## Shipping

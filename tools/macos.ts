@@ -1,8 +1,8 @@
 // Builds the app: the Rust core (the engine inside), the Xcode project (xcodegen) and the app itself.
-//   bun tools/macos.ts [--run] [--no-core] [--debug]
+//   bun tools/macos.ts [--run] [--no-core] [--debug]      (prints the .app; --run quits a running copy and opens it)
 // Needs: Rust (rustup; the engine pins its toolchain), Xcode 16+, xcodegen (brew install xcodegen), Bun.
 import { $ } from "bun";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 const root = resolve(import.meta.dir, "..");
@@ -25,6 +25,12 @@ if (build.exitCode !== 0) {
   console.error(text.split("\n").filter(line => /error:|BUILD FAILED/.test(line)).slice(0, 40).join("\n"));
   process.exit(1);
 }
-const app = join(root, `.build/xcode/Build/Products/${configuration}/ThreeRT App.app`);
+// The app's name is macos/project.yml's PRODUCT_NAME (the one place a fork renames it).
+const name = /PRODUCT_NAME:\s*(.+)/.exec(readFileSync(join(root, "macos/project.yml"), "utf8"))?.[1]?.trim().replace(/^"|"$/g, "") ?? "ThreeRT App";
+const app = join(root, `.build/xcode/Build/Products/${configuration}/${name}.app`);
 console.log(app);
-if (args.includes("--run")) await $`open -n ${app}`;
+if (args.includes("--run")) {
+  // One copy at a time: two would share .build (the sidecar's server file, the scene's bundles).
+  await $`pkill -f ${app + "/Contents/MacOS/"}`.nothrow().quiet();
+  await $`open -n ${app}`;
+}

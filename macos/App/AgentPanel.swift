@@ -64,18 +64,13 @@ struct ChatView: View {
     @EnvironmentObject var model: Model
     @State private var draft = ""
     @FocusState private var focused: Bool
-    private let suggestions = [
-        "Add a reading lamp on the table that I can switch with the L key",
-        "Make the orbs leave a short trail of sparks as they roll",
-        "Turn it into a rainy evening: dim blue light through the skylight",
-    ]
     private var selectedInfo: AgentInfo? { model.agents.first(where: { $0.id == model.agent }) }
     var body: some View {
         VStack(spacing: 0) {
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 9) {
-                        if model.chat.isEmpty { Welcome(suggestions: suggestions, info: selectedInfo) { model.prompt($0) } }
+                        if model.chat.isEmpty { Welcome(text: model.panel, info: selectedInfo) { model.prompt($0) } }
                         ForEach(model.chat) { item in ChatRow(item: item).id(item.id) }
                         if model.agentStatus == "working" || model.agentStatus == "starting" {
                             HStack(spacing: 6) { ProgressView().controlSize(.mini); Text(model.agentStatus == "starting" ? "Starting the agent…" : "Working…").font(.system(size: 11)).foregroundStyle(Theme.dim) }.id("busy")
@@ -102,7 +97,7 @@ struct ChatView: View {
             }
             Rectangle().fill(Theme.line).frame(height: 1)
             HStack(alignment: .bottom, spacing: 8) {
-                TextField("Ask the agent to change the scene…", text: $draft, axis: .vertical)
+                TextField(model.panel.placeholder, text: $draft, axis: .vertical)
                     .textFieldStyle(.plain).font(.system(size: 13)).lineLimit(1...6).focused($focused)
                     .onSubmit { submit() }
                 if model.agentStatus == "working" || model.agentStatus == "waiting" || model.agentStatus == "starting" {
@@ -124,18 +119,18 @@ struct ChatView: View {
 }
 
 struct Welcome: View {
-    let suggestions: [String]
+    let text: PanelText
     let info: AgentInfo?
     let pick: (String) -> Void
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Change the scene by asking").font(.system(size: 14, weight: .bold)).foregroundStyle(Theme.ink)
-            Text("The agent edits the TypeScript in scene/. Every save is rebuilt and reloaded in the view within a second; it checks its own work with `scene check` and `scene shot`.")
+            Text(text.title).font(.system(size: 14, weight: .bold)).foregroundStyle(Theme.ink)
+            Text(text.intro)
                 .font(.system(size: 11.5)).foregroundStyle(Theme.dim).fixedSize(horizontal: false, vertical: true).lineSpacing(2)
             if let info, !info.installed {
                 Text(info.note.isEmpty ? "\(info.name) is not installed." : info.note).font(.system(size: 11.5)).foregroundStyle(Theme.warn).fixedSize(horizontal: false, vertical: true)
             }
-            ForEach(suggestions, id: \.self) { text in
+            ForEach(text.suggestions, id: \.self) { text in
                 Button { pick(text) } label: {
                     HStack(alignment: .top, spacing: 6) {
                         Image(systemName: "sparkles").font(.system(size: 10)).padding(.top, 2)

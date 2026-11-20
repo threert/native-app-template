@@ -9,10 +9,13 @@
 //! after setup, `view {width, height}` when the view's size changes, and `input` every frame.
 //!
 //! Messages the core itself posts (besides the scene's own `host.post`s):
-//!   {"t":"rt.ready","adapter","hwrt","width","height"}    the view is up
+//!   {"t":"rt.ready","bundle","adapter","hwrt","width","height"}   the view is up, running `bundle`
 //!   {"t":"rt.fatal","message"}                            it could not start (no GPU with what the engine needs)
-//!   {"t":"rt.error","where","message"}                    a frame, a message or a reload failed; the view goes on
-//!   {"t":"rt.reloaded"}                                   a new build of the scene runs
+//!   {"t":"rt.error","where","message","bundle"?}          a frame, a message or a reload failed; the view goes on
+//!                                                         (`bundle`: the build a "reload" error is about)
+//!   {"t":"rt.reloaded","bundle"}                          a new build of the scene runs
+//! Reloads asked for while a setup runs are not all run: only the newest of those waiting, so an agent saving file
+//! after file does not queue a setup for each save. The skipped builds get no message (a newer one answers for them).
 //!   {"t":"rt.stats","fps","gpuMs","scale","spp","bounces","scriptMs","shown","width","height"}   once a second
 //!   {"t":"rt.snapshot","path","width","height"}           a snapshot was written
 //!   {"t":"log","level","text"}                            a console line of the scene
@@ -368,9 +371,14 @@ fn run(a: Args, rx: mpsc::Receiver<Cmd>, shared: Arc<Shared>) {
             return;
         }
     };
-    shared.post(serde_json::json!({ "t": "rt.ready", "adapter": s.core.g.adapter_info.name, "hwrt": s.core.g.hwrt, "width": s.core.w, "height": s.core.h }));
+    shared.post(serde_json::json!({ "t": "rt.ready", "bundle": a.bundle, "adapter": s.core.g.adapter_info.name, "hwrt": s.core.g.hwrt, "width": s.core.w, "height": s.core.h }));
     while !shared.quit.load(Ordering::Relaxed) {
-        while let Ok(c) = rx.try_recv() {
+        let mut cmds: Vec<Cmd> = rx.try_iter().collect();
+        // Only the newest reload of those waiting runs (each is a whole setup).
+        if let Some(last) = cmds.iter().rposition(|c| matches!(c, Cmd::Reload(_))) {
+            cmds = cmds.into_iter().enumerate().filter(|(i, c)| *i == last || !matches!(c, Cmd::Reload(_))).map(|(_, c)| c).collect();
+        }
+        for c in cmds {
             match c {
                 Cmd::Resize(w, h, scale) => {
                     s.want = (w.max(1), h.max(1));
@@ -393,9 +401,9 @@ fn run(a: Args, rx: mpsc::Receiver<Cmd>, shared: Arc<Shared>) {
                         let _ = game.host_messages(&mut s.core, &[launch(s.config.width, s.config.height)]);
                         s.game = game;
                         s.input = InputTracker::new();
-                        shared.post(serde_json::json!({ "t": "rt.reloaded" }));
+                        shared.post(serde_json::json!({ "t": "rt.reloaded", "bundle": bundle }));
                     }
-                    Err(e) => shared.post(serde_json::json!({ "t": "rt.error", "where": "reload", "message": format!("{e:#}") })),
+                    Err(e) => shared.post(serde_json::json!({ "t": "rt.error", "where": "reload", "message": format!("{e:#}"), "bundle": bundle })),
                 },
                 Cmd::Quality { fps, scale, bounces } => {
                     s.fps = fps.clamp(15, 120);
@@ -569,7 +577,15 @@ pub unsafe extern "C" fn rt_destroy(h: *mut RtView) {
     let mut h = Box::from_raw(h);
     h.shared.quit.store(true, Ordering::Relaxed);
     let _ = h.tx.send(Cmd::Quit);
+    // The render thread stops between frames; a scene's setup in progress can take long: wait two seconds at most
+    // (the app is quitting; what is left of the thread goes with the process).
     if let Some(t) = h.thread.take() {
-        let _ = t.join();
+        let until = Instant::now() + Duration::from_secs(2);
+        while !t.is_finished() && Instant::now() < until {
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        if t.is_finished() {
+            let _ = t.join();
+        }
     }
 }
