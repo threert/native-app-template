@@ -1,151 +1,136 @@
-// Atrium: a tall concrete gallery lit by one slot of sunlight, with a tower of walnut, copper, ceramic and glass
-// blocks, three pendant lamps on long cords, and glowing orbs you throw that light the room as they roll.
+// Color box: the path tracer's hello world. A room open at the front, lit by nothing but one panel in its ceiling. The
+// light bounces: the coral wall and the teal wall tint the ceiling, the floor and everything in between (global
+// illumination); the mirror block shows both walls, and the glass sphere bends the room and focuses the panel's light
+// onto the floor. Every object is a physics body.
 //
-// This file wires the modules together and holds the controls; each module has a block of tunables at its top:
-//   room.ts      the architecture (size, the ceiling slot)        props.ts    the tower, glass cubes, ceramic sphere
-//   lamps.ts     the swinging pendants                            orbs.ts     the throwable lights
-//   lighting.ts  sun, sky, haze, exposure, day <-> night           camera.ts   the orbit camera and the pointer's ray
-//   materials.ts every surface (procedural, no texture files)
+// Drag to turn, scroll to zoom, click the floor to drop a cube, R to put everything back.
 //
-// Controls (the app sends input every frame: `pointer: "free"`): drag to orbit, wheel to zoom, click to throw an orb
-// where you point, Space to throw one at the centre, N for day / night, R to reset the room, X to put the orbs out.
-import { PerspectiveCamera, Scene, Vector3 } from "@threert/scene";
-import { defineGame, type FrameContext, host, hud } from "@threert/gameplay";
-import { OrbitCamera } from "./camera.ts";
-import { buildLamps, type Lamps } from "./lamps.ts";
-import { buildLighting, type Daylight, POST } from "./lighting.ts";
-import { makeMaterials } from "./materials.ts";
-import { buildOrbs, type Orbs } from "./orbs.ts";
-import { buildProps, type Props } from "./props.ts";
-import { buildRoom } from "./room.ts";
+// Files: this one (the room, the light, the objects, the controls), orbit.ts (the camera, clicks, view rays),
+// pool.ts (the cubes a click drops, made once in setup).
+import {
+  BoxGeometry, Mesh, MeshPhysicalMaterial, MeshStandardMaterial, PerspectiveCamera, RectAreaLight, Scene, SkyColor, SphereGeometry, Vector3,
+} from "@threert/scene";
+import { defineGame, hud } from "@threert/gameplay";
+import { Orbit } from "./orbit.ts";
+import { Pool } from "./pool.ts";
 
 // ------------------------------------------------------------------------------------------------ tunables
 
-/**
- * How the scene starts. `night`: after dark. `orbs`: points (x, y, z) where orbs are dropped at the start, for a
- * room that is already lit by a few. An offline render can ask for either without editing this: a room id of
- * "night", "orbs" or "night+orbs" (`threert-render render --room night+orbs`).
- */
-export const START = { night: false, orbs: [] as [number, number, number][] };
-/** Orbs dropped by the "orbs" room id. */
-const DEMO_ORBS: [number, number, number][] = [[1.1, 0.3, 1.3], [-1.6, 0.3, 1.9], [2.2, 0.3, -1.4], [-0.6, 0.3, -2.4], [3.4, 0.3, 2.6], [-5.5, 0.7, -2.5]];
-/** Keys (US keyboard positions). */
-const KEYS = { night: "N", reset: "R", clear: "X", centre: "Space" };
-/** A press that moves less than this (fraction of the picture) before release is a click, not a drag. */
-const CLICK_SLOP = 0.006;
-/** How far in front of the camera a thrown orb appears (m). */
-const THROW_OFFSET = 0.5;
+/** The room's inside (m): width, height, depth; open toward +z (the camera's side). */
+export const ROOM = { width: 4, height: 3, depth: 4, wall: 0.1 };
+/** The walls' paint. */
+export const WALLS = { left: 0xe0603f, right: 0x2f9c95, rest: 0xf1ede6 };
+/** The ceiling panel, the only light: its size (m), luminance (nits) and colour. */
+export const PANEL = { size: 1.3, nits: 9000, color: 0xfff4e6 };
+/** The camera's exposure (EV100; higher is darker). */
+export const EXPOSURE = 9.1;
+/** What a click drops: cube size (m), colours, how many there can be at once. */
+export const CUBES = { size: 0.3, colors: [0xf2cc8f, 0xe07a5f, 0x81b29a, 0xf1ede6], count: 24 };
 
-// ------------------------------------------------------------------------------------------------ state
+// ------------------------------------------------------------------------------------------------ the scene
 
-// Module state, rebuilt by every setup (the app re-runs setup when the scene is reloaded).
-let orbit: OrbitCamera;
-let lighting: Daylight;
-let lamps: Lamps;
-let props: Props;
-let orbs: Orbs;
-/** The picture's width / height: the app may tell us (a "view" message); 16:9 until it does. */
-let aspect = 16 / 9;
-/** The current left-button press: where it started, where the pointer was last frame, whether it became a drag. */
-let press: { u0: number; v0: number; u: number; v: number; dragging: boolean } | null = null;
+let orbit: Orbit;
+let cubes: Pool;
+/** The objects in the room and where they stand, for R. */
+let objects: { mesh: Mesh; at: Vector3; yaw: number }[] = [];
 
-host.on("view", (m) => {
-  const w = Number(m.width), h = Number(m.height);
-  if (w > 0 && h > 0) aspect = w / h;
-});
-host.on("launch", (m) => {
-  const w = Number(m.params.width), h = Number(m.params.height);
-  if (w > 0 && h > 0) aspect = w / h;
-});
+function buildRoom(scene: Scene): void {
+  const { width: w, height: h, depth: d, wall: t } = ROOM;
+  const slab = (size: [number, number, number], at: [number, number, number], color: number) => {
+    const mesh = new Mesh(new BoxGeometry(...size), new MeshStandardMaterial({ color, roughness: 0.9 }));
+    mesh.position.set(...at);
+    mesh.physics = "fixed";
+    scene.add(mesh);
+  };
+  slab([w + 2 * t, t, d], [0, -t / 2, 0], WALLS.rest); // floor
+  slab([w + 2 * t, t, d], [0, h + t / 2, 0], WALLS.rest); // ceiling
+  slab([w + 2 * t, h + 2 * t, t], [0, h / 2, -d / 2 - t / 2], WALLS.rest); // back
+  slab([t, h, d], [-w / 2 - t / 2, h / 2, 0], WALLS.left);
+  slab([t, h, d], [w / 2 + t / 2, h / 2, 0], WALLS.right);
 
-// ------------------------------------------------------------------------------------------------ interactions
-
-/** Throws an orb along the view ray through a point of the picture (0..1 from the top left). */
-function throwAt(camera: PerspectiveCamera, u: number, v: number): void {
-  const { origin, direction } = orbit.ray(camera, u, v, aspect);
-  orbs.throw(origin.addScaledVector(direction, THROW_OFFSET), direction);
+  // The light: a rectangle in the ceiling facing down (it is also seen, as a glowing card).
+  const panel = new RectAreaLight(PANEL.color, PANEL.nits, PANEL.size, PANEL.size);
+  panel.position.set(0, h - 0.005, 0);
+  panel.lookAt(0, 0, 0);
+  scene.add(panel);
 }
 
-function resetRoom(): void {
-  orbs.clear();
-  props.reset();
-  lamps.reset();
+function buildObjects(scene: Scene): void {
+  const mirror = new MeshStandardMaterial({ color: 0xf2f2f2, metalness: 1, roughness: 0.02 });
+  const glass = new MeshPhysicalMaterial({ color: 0xffffff, roughness: 0, transmission: 1, ior: 1.5 });
+  const clay = new MeshStandardMaterial({ color: 0xf2cc8f, roughness: 0.55 });
+  const place = (mesh: Mesh, at: [number, number, number], yaw = 0) => {
+    mesh.position.set(...at);
+    mesh.rotation.y = yaw;
+    mesh.physics = { type: "dynamic", friction: 0.6, restitution: 0.15 };
+    scene.add(mesh);
+    objects.push({ mesh, at: new Vector3(...at), yaw });
+  };
+  objects = [];
+  // (The block is turned so that it shows the two coloured walls, not the open front.)
+  place(new Mesh(new BoxGeometry(0.9, 1.8, 0.9), mirror), [-0.85, 0.9, -0.75], -0.62);
+  place(new Mesh(new SphereGeometry(0.55, 64, 32), glass), [0.85, 0.55, 0.35]);
+  place(new Mesh(new SphereGeometry(0.32, 64, 32), clay), [-0.15, 0.32, 0.95]);
+
+  const kinds = CUBES.colors.map((color) => ({
+    geometry: new BoxGeometry(CUBES.size, CUBES.size, CUBES.size),
+    material: new MeshStandardMaterial({ color, roughness: 0.5 }),
+  }));
+  cubes = new Pool(scene, kinds, CUBES.count, { friction: 0.6, restitution: 0.2 });
 }
 
-/** One frame of input: orbit by dragging, zoom by wheel, throw by clicking, keys. */
-function handleInput(f: FrameContext<unknown>): void {
-  const input = f.input;
-  const { u, v } = input.pointer;
-  if (input.pressed("Mouse0")) press = { u0: u, v0: v, u, v, dragging: false };
-  if (press && input.button(0)) {
-    if (!press.dragging && Math.hypot(u - press.u0, v - press.v0) > CLICK_SLOP) {
-      press.dragging = true;
-      orbit.drag(u - press.u0, v - press.v0); // what moved before it counted as a drag
-    } else if (press.dragging) orbit.drag(u - press.u, v - press.v);
-    press.u = u;
-    press.v = v;
+/** Everything back where it started, the dropped cubes gone. */
+function reset(): void {
+  const still = new Vector3();
+  for (const o of objects) {
+    o.mesh.position.copy(o.at);
+    o.mesh.rotation.set(0, o.yaw, 0);
+    o.mesh.setLinearVelocity(still);
+    o.mesh.setAngularVelocity(still);
   }
-  if (press && input.released("Mouse0")) {
-    if (!press.dragging) throwAt(f.camera, press.u0, press.v0);
-    press = null;
-  }
-  if (input.wheel) orbit.dolly(input.wheel);
-  if (input.pressed(KEYS.centre)) throwAt(f.camera, 0.5, 0.5);
-  if (input.pressed(KEYS.night)) lighting.toggle();
-  if (input.pressed(KEYS.reset)) resetRoom();
-  if (input.pressed(KEYS.clear)) orbs.clear();
-}
-
-function showHud(): void {
-  const phase = lighting.t <= 0 ? "Day" : lighting.t >= 1 ? "Night" : lighting.night ? "Dusk" : "Dawn";
-  hud.set({
-    items: [
-      { type: "text", anchor: "top-left", label: "Atrium", text: `${phase} · ${orbs.live} ${orbs.live === 1 ? "light" : "lights"}`, tone: "dim", size: "small" },
-      { type: "text", anchor: "bottom-left", text: "Drag to orbit · Scroll to zoom · Click to throw a light", tone: "dim", size: "small" },
-      { type: "text", anchor: "bottom-left", text: "N  day / night   ·   Space  throw at centre   ·   X  put out lights   ·   R  reset", tone: "dim", size: "small" },
-    ],
-  });
+  cubes.clear();
 }
 
 // ------------------------------------------------------------------------------------------------ the game
 
 export default defineGame({
   state: {},
-  handlers: {}, // no game state to change: everything here lives in the scene
-  pointer: "free",
-  setup(ctx) {
-    const mode = new Set(ctx.roomId.split("+"));
-    const night = START.night || mode.has("night");
-    const drops = mode.has("orbs") ? DEMO_ORBS : START.orbs;
-
+  handlers: {},
+  pointer: "free", // the app sends the pointer and keys every frame (f.input)
+  setup() {
     const scene = new Scene();
-    const materials = makeMaterials();
-    buildRoom(scene, materials);
-    props = buildProps(scene, materials, ctx.random);
-    lamps = buildLamps(scene, materials);
-    orbs = buildOrbs(scene);
-    lighting = buildLighting(scene, night);
+    scene.environment = new SkyColor(0x000000, 0); // no sky: the panel is the only light
+    buildRoom(scene);
+    buildObjects(scene);
 
     const camera = new PerspectiveCamera(40, 16 / 9, 0.05, 100);
-    camera.name = "camera";
+    camera.setManualExposure(EXPOSURE);
     scene.add(camera);
-    orbit = new OrbitCamera();
+    orbit = new Orbit({ target: [0, 1.4, 0], yaw: 0, pitch: 0.05, distance: 6.4, yawRange: [-0.7, 0.7], pitchRange: [-0.2, 0.55], distanceRange: [4.2, 9] });
     orbit.update(camera, 0, true);
-    lamps.setLevel(lighting.update(0, camera));
-    press = null;
-    for (const p of drops) orbs.place(new Vector3(...p));
-
     return {
       scene,
       camera,
-      options: { name: "atrium", width: 1280, height: 720, preset: "cinematic" as const, overrides: { post: POST } },
+      options: { name: "color-box", width: 1280, height: 720, preset: "cinematic" as const, overrides: { post: { bloom: { intensity: 0.3, threshold: 1.3 }, vignette: 0.2 } } },
     };
   },
   frame(f) {
-    if (f.dt > 0) handleInput(f);
+    if (f.dt > 0) {
+      const click = orbit.input(f);
+      if (click) {
+        // A cube from just under the ceiling, above the point of the floor that was clicked (inside the room only).
+        const at = orbit.pointOn(f.camera, click.u, click.v);
+        const inside = at && Math.abs(at.x) < ROOM.width / 2 - CUBES.size && Math.abs(at.z) < ROOM.depth / 2 - CUBES.size;
+        if (at && inside) cubes.launch(at.set(at.x, ROOM.height - 0.4, at.z), new Vector3(0, -1, 0), Math.random() * 4 - 2);
+      }
+      if (f.input.pressed("R")) reset();
+    }
     orbit.update(f.camera, f.dt, f.snap);
-    orbs.update(f.dt);
-    lamps.setLevel(lighting.update(f.dt, f.camera));
-    showHud();
+    hud.set({
+      items: [
+        { type: "text", anchor: "top-left", label: "Color box", text: "one light, every bounce traced", tone: "dim", size: "small" },
+        { type: "text", anchor: "bottom-left", text: "Drag to turn · Scroll to zoom · Click the floor to drop a cube · R to reset", tone: "dim", size: "small" },
+      ],
+    });
   },
 });

@@ -4,9 +4,9 @@
     "intro": "The agent edits the TypeScript in scene/. Every save is rebuilt and reloaded in the view within a second; it checks its own work with `scene check` and `scene shot`.",
     "placeholder": "Ask the agent to change the scene…",
     "suggestions": [
-      "Add a reading lamp on the table that I can switch with the L key",
-      "Make the orbs leave a short trail of sparks as they roll",
-      "Turn it into a rainy evening: dim blue light through the skylight"
+      "Add a gold torus knot that slowly turns on the floor",
+      "Turn the right wall into a window with blue daylight coming in",
+      "Make the cubes I drop glow softly in warm colours"
     ]
   }
 }
