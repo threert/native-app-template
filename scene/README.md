@@ -1,121 +1,84 @@
-# Atrium
+# Color box
 
-A tall concrete gallery lit by a single slot of sunlight. A tower of walnut, copper, ceramic and glass blocks stands
-in the beam; three bronze pendants hang on long cords; the floor is polished dark terrazzo that reflects all of it.
-Click and you throw a glowing orb: a real light source that flies, bounces, rolls, knocks the tower down and lights
-the room with global illumination as it goes. Press N and the sun sets through the slot; at night the room is lit
-only by the pendants and whatever orbs you have thrown.
+The path tracer's hello world: a room open at the front, lit by nothing but one panel in its ceiling. The light
+bounces. The coral wall and the teal wall tint the ceiling, the floor and everything between them (global
+illumination); the mirror block shows both walls; the glass sphere bends the room and focuses the panel's light into
+a bright spot on the floor (a caustic); the shadows are soft because the light is an area, not a point. Every object
+is a physics body: click the floor and a cube falls from the ceiling and knocks into things.
 
-Everything is procedural: geometry from the SDK, surfaces from small WGSL material functions. No asset files.
-
-![day](../docs/shots/day.png)
+![The color box](../docs/shots/window.png)
 
 ## Controls
 
 | input | does |
 | --- | --- |
-| left-drag | orbit the camera around the tower |
+| left-drag | turn around the room |
 | wheel | come closer / back off |
-| left-click (no drag) | throw an orb along the ray through the pointer |
-| Space | throw an orb at the centre of the view |
-| N | day / night (a 6-second time-lapse through sunset or sunrise) |
-| X | put out every orb |
-| R | reset the room: tower and cubes rebuilt, lamps still, orbs out |
+| left-click on the floor | drop a cube from under the ceiling |
+| R | put everything back, the dropped cubes gone |
 
-At most 12 orbs are alight; throwing another retires the oldest (it fades out).
-
-## Modules
+## Files
 
 | file | what is in it | tunables at the top |
 | --- | --- | --- |
-| `main.game.ts` | the entry: wires the modules, reads input (drag / click / keys), the HUD | `START` (begin at night, orbs already in the room), keys, click slop |
-| `room.ts` | walls, floor, ceiling with its slots, benches; `block()` helper for fixed boxes | `ROOM` size, `SLOTS` (where the sun comes in) |
-| `props.ts` | the tower, the glass pyramid, the ceramic sphere; `reset()` | `TOWER`, `LAYERS` (the tower as rows of letters), `CUBES`, `SPHERE` |
-| `lamps.ts` | pendants: shade body on a `BallJoint` to a ceiling canopy, emissive diffuser | `PENDANTS` (where, how low), `SWING` |
-| `orbs.ts` | the throwable lights: a pool made in setup, thrown / retired / faded | `ORBS` (count, size, speed, brightness), `PALETTE` |
-| `lighting.ts` | sun, sky, haze, exposure, day <-> night time-lapse, post-processing | `DAY`, `NIGHT`, `TRANSITION`, `HAZE`, `POST` |
-| `camera.ts` | orbit camera (smoothed, kept inside the walls) and the pointer's view ray | `ORBIT` |
-| `materials.ts` | every material, and the WGSL functions for concrete, terrazzo, walnut, brushed metal | `CONCRETE`, `STONE`, `WALNUT`, `COPPER`, `CERAMIC`, `GLASS`, `PENDANT` |
+| `main.game.ts` | the room, the light, the objects, the controls, the HUD | `ROOM`, `WALLS`, `PANEL`, `EXPOSURE`, `CUBES` |
+| `orbit.ts` | the camera: orbit by dragging, zoom by wheel, click vs drag, the view ray through a point of the picture | drag speed, click slop, smoothing |
+| `pool.ts` | the cubes a click drops: made once in setup, parked on a hidden shelf under the floor | |
+| `app.json` | the app's words in the agent panel (title, intro, suggested prompts) | |
 
-Units are physical: metres, kilograms, lux for the sun, nits for emission, EV100 for exposure. y is up, the floor's
-top is y = 0, the room is centred on the origin, its front (where the camera starts) is +z.
+Units are physical: metres, kilograms, nits for light from surfaces (the panel), EV100 for the exposure. y is up,
+the floor's top is y = 0, the room is centred on the origin, its open side (where the camera is) is +z.
 
-## How it works (the parts worth knowing before changing them)
+## How it works
 
-- **Physics.** Every visible thing has a body: the room's boxes are `"fixed"`, the blocks, cubes, sphere, lamp shades
-  and orbs are `"dynamic"`. The engine steps the world at 60 Hz and moves the objects; no script runs per body per
-  frame. Reading `mesh.position` gives the body's pose; writing it teleports the body.
-- **Orbs are a pool.** Adding an emissive object or a new material while the scene runs can make the renderer rebuild
-  its scene (a hitch). So all 14 orbs (12 + 2 spares fading out) are built in setup, parked on a hidden shelf under the
-  floor with `power = 0`. Throwing one moves it to the camera, sets its velocity and fades `power` up; retiring it
-  fades `power` down and parks it. Moving bodies and changing `power` are in-place updates.
-- **Lights are emissive surfaces.** Orbs are emissive spheres and the pendants' diffusers are emissive discs; the
-  path tracer samples emissive triangles as lights, so there are no separate light objects to keep in step.
-  Brightness is `emissiveIntensity` in nits.
-- **Day <-> night** moves the sun (`setSunAngles`) of a `dynamic` `SkyAtmosphere`, which the live view updates in
-  place, and changes the camera's manual exposure with it. The pendants' `power` follows.
-- **Input.** The game declares `pointer: "free"`, so the app sends an `input` message every frame and the frame
-  script reads `f.input`. A press that moves less than `CLICK_SLOP` before release is a click (throw), otherwise a
-  drag (orbit). The view ray needs the picture's aspect ratio: the scene takes it from a `{ t: "view", width,
-  height }` host message or from `width` / `height` in the launch params, and assumes 16:9 until then.
-- **Materials** multiply a procedural pattern into the material's own `color` / `roughness`, so the colour you set in
-  `materials.ts` is still the main knob. Patterns on things that move use mesh UVs (`i.uv`), patterns on the room use
-  world position (`i.wp`). Fine detail is computed only for camera hits (`i.depth == 0u`).
+- **One light, every bounce.** The panel is a `RectAreaLight` (luminance in nits; it is also drawn, as a glowing
+  card). The sky is black (`SkyColor` at 0), so everything you see is the panel's light, straight or bounced. The
+  walls are matte (`roughness: 0.9`): each bounce carries their colour on.
+- **Physics.** The walls are `"fixed"` bodies, the objects and cubes `"dynamic"`. The engine steps the world and moves
+  them; the frame script only reads input. Writing `mesh.position` teleports a body (`reset()` does that).
+- **Things that come and go are a pool.** Adding a mesh while the scene runs makes the renderer rebuild its scene (a
+  hitch), so the cubes are all made in setup and wait on a hidden shelf under the floor; a click moves the next one to
+  the ceiling (`Pool.launch`).
+- **Input.** The game declares `pointer: "free"`, so the app sends the pointer and keys every frame (`f.input`).
+  `Orbit.input` turns them into a drag or a click; `Orbit.pointOn` finds the floor under the pointer. The view ray
+  needs the picture's aspect ratio, which the app sends (`view`, `launch` host messages).
 
 ## Recipes
 
-**Add a prop.** In `props.ts`, make a mesh and hand it to `place()`, which gives it a dynamic body, a seed for its
-material pattern and a home that `reset()` returns it to:
+**Another object.** In `buildObjects()`, make a mesh and `place()` it: it gets a dynamic body and a spot that R
+returns it to. Keep it modest (tens of thousands of triangles in total is fine).
 
 ```ts
-const vase = new Mesh(new CylinderGeometry(0.12, 0.18, 0.5, 32), m.ceramic);
-vase.name = "vase";
-place(vase, new Vector3(-2.0, 0.25, -3.0), 0, { mass: 8 });
+const gold = new MeshStandardMaterial({ color: 0xffc66b, metalness: 1, roughness: 0.2 });
+place(new Mesh(new TorusKnotGeometry(0.25, 0.08, 160, 20), gold), [0.2, 0.35, -0.9]);
 ```
 
-Something that should never move: `scene.add(block("plinth_2", [w, h, d], [x, y, z], m.travertine))` (a fixed box).
-Keep it modest: tens of thousands of triangles in total is fine.
+**The look.** `WALLS` (any colours: saturated ones show the bounce best), `PANEL` (bigger is softer shadows; more
+nits is brighter), `EXPOSURE` (lower is brighter). Materials: `roughness` 0 is a mirror, 1 matte; `metalness: 1` for
+metals; `MeshPhysicalMaterial` with `transmission: 1` for glass (`ior` 1.5), `clearcoat` for a glaze.
 
-**Change the tower.** Edit `LAYERS` in `props.ts`: one string per layer from the bottom, three letters each (W walnut,
-K copper, C ceramic, G glass, F frosted, `.` no block). `TOWER.block` sets the block's size.
+**More light.** Another `RectAreaLight` (a window in a wall: put it in the wall's plane, facing in), a `PointLight`
+(candela), or an emissive surface: `new MeshStandardMaterial({ emissive: 0xffb36b, emissiveIntensity: 400 })` (nits)
+makes a mesh glow and light the room. Prefer a few large lights to many small ones: every glowing surface is sampled.
+Make lights in setup; change their `intensity` when something happens, not a little every frame (each change tells
+the denoiser the lighting changed, and the picture gets noisier for a moment).
 
-**Change the time of day.** `DAY.elevation` / `DAY.azimuth` in `lighting.ts` move the sun (lower elevation = longer,
-warmer light; below about 25 degrees the ceiling stops it). `DAY.exposure` / `NIGHT.exposure` set the picture's
-brightness (EV100: lower is brighter). To start at night, set `START.night = true` in `main.game.ts`. If you move the
-sun, look at where the beam lands: `SLOTS` in `room.ts` places the openings it comes through.
-
-**Make the room hazier or clearer.** `HAZE.density` in `lighting.ts` (0 turns the dust off and saves a few ms).
-
-**A new material.** For a plain one, add a `MeshStandardMaterial` / `MeshPhysicalMaterial` to `makeMaterials()` in
-`materials.ts` (and to its return value). For a patterned one, write a `MaterialFunction` next to the others: its
-`code` is WGSL that changes `o` (`o.base`, `o.roughness`, `o.metallic`, `o.emissive`, `o.normal`); reuse `HELPERS` and
-name new helpers `atr_*`. See `../engine/docs/MATERIAL_FUNCTIONS.md` for the inputs (`i.wp`, `i.uv`, `i.custom`, ...).
-Make materials in setup only, never per frame.
-
-**Change the orbs.** `ORBS` in `orbs.ts`: `max`, `radius`, `speed`, `nits` (how much light), `restitution` (bounce).
-`PALETTE` lists their colours as kelvin numbers or hex strings. Changing `max` changes the pool size; nothing else
-needs to change.
-
-**A new interaction.** Input is read in `handleInput()` in `main.game.ts`. Add a key the same way as the others
-(`if (input.pressed("G")) ...`, keys named by their US-keyboard position). To act on what the pointer is over, cast
-the view ray into the physics world:
+**A new interaction.** Read a key in `frame` (`if (f.input.pressed("G")) ...`, keys named by their place on a US
+keyboard). To act on what the pointer is over, cast the view ray into the physics world:
 
 ```ts
-const { origin, direction } = orbit.ray(f.camera, input.pointer.u, input.pointer.v, aspect);
-const hit = new Raycaster(origin, direction).intersectPhysics()[0];   // { object, point, normal, distance }
-if (hit && hit.object.physics?.type === "dynamic") hit.object.applyImpulse(direction.multiplyScalar(60), hit.point);
+const { origin, direction } = orbit.ray(f.camera, f.input.pointer.u, f.input.pointer.v);
+const hit = new Raycaster(origin, direction).intersectPhysics()[0]; // { object, point, normal, distance }
+if (hit && hit.object.physics?.type === "dynamic") hit.object.applyImpulse(direction.multiplyScalar(20), hit.point);
 ```
 
-Things that should happen over time go in the frame script (`frame(f)`, with `f.dt` / `f.time`); there are no timers.
-Tell the player about it in `showHud()`.
+Things that happen over time go in the frame script (`frame(f)`, with `f.dt` / `f.time`); there are no timers. Tell
+the player about a new control in the HUD at the end of `frame`.
 
-**Change the camera.** `ORBIT` in `camera.ts`: the target point, the starting yaw / pitch / distance, limits, drag
-speed and smoothing, field of view.
+**The camera.** The `Orbit` options in `setup` (target, starting yaw / pitch / distance, limits); `fov` is the
+`PerspectiveCamera`'s first argument.
 
-## Rendering a still without the app
+## A still without the app
 
-From the repository root: `bun tools/still.ts /tmp/atrium.png --time 2` renders the default view by day. For night or
-for a room with orbs in it, either set `START` in `main.game.ts`, or call the renderer with a room id: the scene reads
-`night`, `orbs` or `night+orbs` from it (`threert-render render <bundle> --room night+orbs`). Note that an offline
-render runs physics up to `--time` but calls the frame script with `dt = 0`, so time-based fades and the day / night
-time-lapse don't advance there; the room-id modes set their end states directly.
+From the repository root: `bun tools/still.ts /tmp/box.png --time 2`. An offline render runs physics up to `--time`
+but calls the frame script with `dt = 0`, so nothing that follows input or time moves there.

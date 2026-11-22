@@ -112,7 +112,8 @@ final class Model: ObservableObject {
     @Published var chat: [ChatItem] = []
 
     // The panel and the code viewer
-    @Published var showPanel = true
+    /// The side panel (agent, code, console): hidden until asked for (⌘\, the toolbar button, ⌘1–3).
+    @Published var showPanel = false
     @Published var tab = "agent"
     @Published var files: [String] = []
     @Published var openFile: String?

@@ -3,7 +3,7 @@
 <p align="center"><b>Native apps with a live path-traced 3D view, and a coding agent beside it that edits the scene while it runs.</b></p>
 
 <p align="center">
-  <img src="docs/shots/window.png" width="100%" alt="The macOS template at night: a concrete gallery path-traced live, pendant lamps and thrown glowing orbs lighting the room, and the side panel where Claude Code has just added a reading lamp on the bench">
+  <img src="docs/shots/window.png" width="100%" alt="The macOS template: the color box path-traced live, a room lit by one ceiling panel, its coral and teal walls tinting the white surfaces, a mirror block showing both walls and a glass sphere focusing the light onto the floor">
 </p>
 
 This is the starting point for building an app on [ThreeRT](https://github.com/meshy-dev/ThreeRT), the hardware
@@ -21,15 +21,20 @@ Fork it, replace the scene, keep the plumbing:
   soft shadows, reflections, glass, emissive surfaces that light the room) running on its own thread on the
   platform's surface (a `CAMetalLayer` on macOS), behind a C ABI of 14 calls (`core/`). Your UI goes on top in the
   platform's framework.
-- **A scene with physics.** *Atrium*, a concrete gallery with a sunbeam through a ceiling slot, a tower of blocks in
-  walnut, copper, ceramic and glass, pendant lamps that swing on ball joints, and glowing orbs you throw: each orb is a light
-  that rolls through the room, knocks the tower over and sets the lamps swinging. Day and night.
+- **A hello-world scene.** *Color box*, the path tracer's classic, in one file of about 140 lines: a room lit by one panel in its
+  ceiling, a coral wall and a teal wall whose colour the light carries onto everything else, a mirror block, a glass
+  sphere that focuses the light onto the floor. Every object is a physics body; click the floor to drop cubes in.
 - **Your coding agent, in the app.** The Claude Code or Codex already installed on the machine runs in a side panel
   over the [Agent Client Protocol](https://agentclientprotocol.com). Ask for a change; the agent edits the scene's
   TypeScript, and the view hot-reloads it within a second. It checks its own work with `scene check` (build, types,
   and the running app's errors) and `scene shot` (a PNG of the live view it can look at).
-- **A code viewer.** The scene's files with syntax highlighting and line numbers; it follows the file the agent is
-  editing and marks the lines that changed. A console shows the scene's logs and errors.
+- **A code viewer.** The scene's files as an editor shows them (syntax highlighting, a line-number gutter, no
+  wrapping); it follows the file the agent is editing, goes to the lines that changed and marks them. A console shows
+  the scene's logs and errors.
+
+<p align="center">
+  <img src="docs/shots/panel.png" width="100%" alt="The side panel open beside the scene: the agent, with prompts to try">
+</p>
 
 ## macOS
 
@@ -50,12 +55,12 @@ cd my-app
 bun tools/macos.ts --run      # builds the engine + core (a few minutes the first time), the app, and opens it
 ```
 
-In the view: **drag** to orbit, **scroll** to zoom, **click** to throw a light, **Space** throws one at the centre,
-**N** day / night, **X** puts the lights out, **R** resets the room. **⌘\\** shows or hides the panel, **⌘1–3**
-switch it between Agent, Code and Console, **⇧⌘S** saves a snapshot to the Desktop.
+In the view: **drag** to turn, **scroll** to zoom, **click** the floor to drop a cube, **R** puts everything back.
+The panel starts hidden: **⌘\\** (or the button at the top) shows it, **⌘1–3** open it on Agent, Code or Console,
+**⇧⌘S** saves a snapshot to the Desktop.
 
-Then ask the agent something: *"Add a small reading lamp on the left bench that I can switch on and off with the L
-key"*. The picture above is that request, done by Claude Code from the panel.
+Then ask the agent something: *"Add a gold torus knot that slowly turns on the floor"*, or *"Turn the right wall
+into a window with blue daylight coming in"*.
 
 ## How it fits together
 
